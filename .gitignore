@@ -1,0 +1,40 @@
+# Build output (releases are published separately, never commit build artifacts)
+build/
+out/
+bin/
+
+# Gradle
+.gradle/
+
+# NeoForge / Minecraft dev run directories
+# These hold logs, world saves, account name, UUID, server.properties — never publish.
+run/
+runs/
+logs/
+crash-reports/
+
+# Eclipse (regenerable via `gradle genEclipseRuns`; may embed local paths)
+.eclipse/
+.settings/
+.project
+.classpath
+.metadata/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Stray logs / temp / backups
+*.log
+*.tmp
+*.bak
