@@ -103,6 +103,21 @@ record InkSource(
 
 core 不修改 `InkSource`，原样透传到事件。玩法模块读它，不需要知道输入的具体实现。
 
+### 跨模块服务：Service Registry
+
+`InkSource.extra` 只表示一次识别事件的随事件负载，方向是 input -> core -> gameplay。需要跨模块同步查询能力时，不要把 `extra` 当双向黑板；改用 core 的类型安全服务注册表：
+
+```java
+AozaiInkCoreApi.registerService(GlyphDescriber.class, describer);
+GlyphDescriber describer = AozaiInkCoreApi.getService(GlyphDescriber.class);
+```
+
+接口契约放在 `aozaink-core` / `core.api`，实现留在具体模块。任何模块都可以注册或查询服务；没人注册时 `getService` 返回 `null`。
+
+### 跨模块单向信号：InkModuleSignalEvent
+
+`InkModuleSignalEvent` 是一个通用的模块间信号容器：`ServerPlayer + ResourceLocation signalId + CompoundTag payload`。core 只提供事件类型，不注册具体信号、不解释 `signalId`，也不把它映射成玩法或成就。当前用法是 input 广播客观输入结果，sigillum 作为玩法模块自行解释。
+
 ### 输出：InkRecognizedEvent
 
 ```java

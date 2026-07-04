@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class AozaiInkCoreApi {
     private static InkMarkStore markStore;
@@ -20,8 +21,19 @@ public final class AozaiInkCoreApi {
     private static TrajectoryOcrEngine trajectoryEngine;
     private static final Map<String, EngineType> inputRegistrations = new HashMap<>();
     private static final Set<String> registeredGlyphs = new HashSet<>();
+    private static final Map<Class<?>, Object> services = new ConcurrentHashMap<>();
 
     private AozaiInkCoreApi() {
+    }
+
+    public static <T> void registerService(Class<T> type, T impl) {
+        if (type == null || impl == null) return;
+        services.put(type, impl);
+    }
+
+    public static <T> T getService(Class<T> type) {
+        Object impl = services.get(type);
+        return impl == null ? null : type.cast(impl);
     }
 
     public static void installStore(InkMarkStore store) {
