@@ -7,8 +7,11 @@ import com.aozainkmc.core.api.InkMark;
 import com.aozainkmc.core.api.InkRecognitionRequest;
 import com.aozainkmc.core.api.InkRecognitionResult;
 import com.aozainkmc.core.api.InkRecognizedEvent;
+import com.aozainkmc.core.api.InkSource;
 import com.aozainkmc.core.api.InkTarget;
 import com.aozainkmc.core.api.InkTrace;
+import com.aozainkmc.core.dev.AozaiInkDevMode;
+import com.aozainkmc.core.ocr.DebugDump;
 import com.aozainkmc.core.ocr.OcrEngine;
 import com.aozainkmc.core.ocr.TrajectoryOcrEngine;
 import com.aozainkmc.core.ocr.TrajectoryResult;
@@ -22,11 +25,17 @@ public final class InkRecognizerImpl implements InkRecognizer {
 
     @Override
     public InkRecognitionResult recognize(InkRecognitionRequest request) throws Exception {
-        EngineType type = AozaiInkCoreApi.engineTypeFor(request.source().sourceId());
-        if (type == EngineType.ONLINE_TRAJECTORY) {
-            return recognizeTrajectory(request);
+        boolean previousDump = DebugDump.isEnabled();
+        DebugDump.setEnabled(request.devMode());
+        try {
+            EngineType type = AozaiInkCoreApi.engineTypeFor(request.source().sourceId());
+            if (type == EngineType.ONLINE_TRAJECTORY) {
+                return recognizeTrajectory(request);
+            }
+            return recognizeImage(request);
+        } finally {
+            DebugDump.setEnabled(previousDump);
         }
-        return recognizeImage(request);
     }
 
     private static InkRecognitionResult recognizeImage(InkRecognitionRequest request) throws Exception {
@@ -87,8 +96,24 @@ public final class InkRecognizerImpl implements InkRecognizer {
         MinecraftServer server,
         ServerPlayer player
     ) throws Exception {
-        InkRecognitionResult result = recognize(request);
+        InkRecognitionRequest devAware = new InkRecognitionRequest(
+            request.trace(), request.imageInput(), request.mode(),
+            request.candidateWhitelist(), request.ttlTicks(), request.source(),
+            AozaiInkDevMode.isEnabled(player));
+        InkRecognitionResult result = recognize(devAware);
         if (result.candidates().isEmpty()) {
+            return null;
+        }
+        return broadcast(result, request.source(), player);
+    }
+
+    @Override
+    public InkRecognizedEvent broadcast(
+        InkRecognitionResult result,
+        InkSource source,
+        ServerPlayer player
+    ) throws Exception {
+        if (result == null || result.candidates().isEmpty()) {
             return null;
         }
 
@@ -99,16 +124,16 @@ public final class InkRecognizerImpl implements InkRecognizer {
             result.confidence(),
             player.getUUID(),
             target,
-            request.source().sourceId(),
+            source.sourceId(),
             player.serverLevel().getGameTime(),
-            request.ttlTicks()
+            defaultTtl(source)
         );
 
         AozaiInkCoreApi.markStore().attach(mark);
 
         InkRecognizedEvent event = new InkRecognizedEvent(
             result,
-            request.source(),
+            source,
             mark,
             player,
             player.serverLevel()
@@ -116,5 +141,10 @@ public final class InkRecognizerImpl implements InkRecognizer {
         NeoForge.EVENT_BUS.post(event);
 
         return event.isCanceled() ? null : event;
+    }
+
+    private static long defaultTtl(InkSource source) {
+        // The source itself does not carry TTL; reuse the historical default of 10 minutes.
+        return 20L * 60L * 10L;
     }
 }

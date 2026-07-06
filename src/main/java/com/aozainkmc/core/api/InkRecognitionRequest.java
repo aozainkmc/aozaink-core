@@ -9,8 +9,14 @@ public record InkRecognitionRequest(
     InkRecognitionMode mode,
     List<String> candidateWhitelist,
     long ttlTicks,
-    InkSource source
+    InkSource source,
+    boolean devMode
 ) {
+    public InkRecognitionRequest(InkTrace trace, float[] imageInput, InkRecognitionMode mode,
+                                  List<String> candidateWhitelist, long ttlTicks, InkSource source) {
+        this(trace, imageInput, mode, candidateWhitelist, ttlTicks, source, false);
+    }
+
     public InkRecognitionRequest {
         if (mode == null) mode = InkRecognitionMode.OFFLINE;
         if (candidateWhitelist == null) candidateWhitelist = Collections.emptyList();

@@ -16,11 +16,23 @@ public final class DebugDump {
     private static final int OFFLINE_SIZE = 64;
     private static final int TRAJECTORY_SIZE = 256;
     private static final int TRAJECTORY_PADDING = 18;
+    private static final ThreadLocal<Boolean> ENABLED = ThreadLocal.withInitial(() -> true);
 
     private DebugDump() {
     }
 
+    public static boolean isEnabled() {
+        return ENABLED.get();
+    }
+
+    public static void setEnabled(boolean enabled) {
+        ENABLED.set(enabled);
+    }
+
     public static void offlineImageInput(float[] input) {
+        if (!isEnabled()) {
+            return;
+        }
         if (input == null || input.length != OFFLINE_SIZE * OFFLINE_SIZE) {
             return;
         }
@@ -36,6 +48,9 @@ public final class DebugDump {
     }
 
     public static void onlineTrajectoryInput(float[][] features) {
+        if (!isEnabled()) {
+            return;
+        }
         if (features == null || features.length == 0) {
             return;
         }
@@ -82,6 +97,9 @@ public final class DebugDump {
     }
 
     public static void onlineCandidates(List<InkCandidate> candidates, String label) {
+        if (!isEnabled()) {
+            return;
+        }
         if (candidates == null || candidates.isEmpty()) {
             return;
         }
