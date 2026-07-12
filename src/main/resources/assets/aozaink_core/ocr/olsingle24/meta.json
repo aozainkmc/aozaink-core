@@ -1,0 +1,25 @@
+{
+  "format": "olsingle24_dynamic_candidate_engram",
+  "source_checkpoint": "runs_olsingle24_from23_flash/best.pt",
+  "model": "candidate_dynamic.onnx",
+  "vocab": "vocab.json",
+  "num_glyphs": 7356,
+  "inputs": [
+    "trajectory",
+    "mask",
+    "candidate_ids"
+  ],
+  "output": "logits",
+  "dynamic_axes": {
+    "batch": true,
+    "time": true,
+    "num_candidates": true
+  },
+  "candidate_neighbor_count": 6,
+  "in_dim": 6,
+  "max_points": 256,
+  "simplify_eps": 0.018,
+  "progress_mode": "arc",
+  "model_type": "dynamic_candidate_engram",
+  "profile": "flash"
+}

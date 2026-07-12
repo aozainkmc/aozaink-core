@@ -23,6 +23,7 @@ import java.util.Map;
 public final class OnnxTrajectoryOcrEngine implements TrajectoryOcrEngine {
 
     private final OrtEnvironment environment;
+    private final OrtSession singleModel;
     private final OrtSession encoder;
     private final List<OrtSession> blocks;
     private final List<String> chars;
@@ -38,11 +39,17 @@ public final class OnnxTrajectoryOcrEngine implements TrajectoryOcrEngine {
         JsonObject meta = loadJson(modelDir + "/meta.json");
         this.hiddenDim = getInt(meta, "hidden_dim", 160);
         this.usesSpatial = meta.has("spatial_dim") && !meta.get("spatial_dim").isJsonNull();
-        int numExits = getInt(meta, "num_exits", 6);
-        this.encoder = createSession(modelDir + "/encoder.onnx");
         this.blocks = new ArrayList<>();
-        for (int i = 1; i <= numExits; i++) {
-            this.blocks.add(createSession(modelDir + "/block_" + i + ".onnx"));
+        if (meta.has("model") && !meta.get("model").getAsString().isBlank()) {
+            this.singleModel = createSession(modelDir + "/" + meta.get("model").getAsString());
+            this.encoder = null;
+        } else {
+            this.singleModel = null;
+            int numExits = getInt(meta, "num_exits", 6);
+            this.encoder = createSession(modelDir + "/encoder.onnx");
+            for (int i = 1; i <= numExits; i++) {
+                this.blocks.add(createSession(modelDir + "/block_" + i + ".onnx"));
+            }
         }
         this.chars = loadVocab(modelDir + "/vocab.json");
         this.charToId = new HashMap<>();
@@ -164,46 +171,60 @@ public final class OnnxTrajectoryOcrEngine implements TrajectoryOcrEngine {
         long[] trajShape = {1L, time, 6L};
         long[] maskShape = {1L, time};
 
-        float[] x;
+        long[] candidateIds = resolveCandidateIds(candidateWhitelist);
+        long[] candShape = {1L, candidateIds.length};
+        float[] logits = null;
+        float[] x = null;
         float[] spatial = null;
         try (OnnxTensor trajectoryTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(trajectoryFlat), trajShape);
              OnnxTensor maskTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(maskFlat), maskShape)) {
-            Map<String, OnnxTensor> inputs = new HashMap<>();
-            inputs.put("trajectory", trajectoryTensor);
-            inputs.put("mask", maskTensor);
-            try (OrtSession.Result result = encoder.run(inputs)) {
-                x = flatten3d(result.get(0).getValue());
-                if (usesSpatial) {
-                    spatial = flatten2d(result.get(1).getValue());
+            if (singleModel != null) {
+                try (OnnxTensor candTensor = OnnxTensor.createTensor(
+                        environment, LongBuffer.wrap(candidateIds), candShape)) {
+                    Map<String, OnnxTensor> inputs = new HashMap<>();
+                    inputs.put("trajectory", trajectoryTensor);
+                    inputs.put("mask", maskTensor);
+                    inputs.put("candidate_ids", candTensor);
+                    try (OrtSession.Result result = singleModel.run(inputs)) {
+                        logits = flatten2d(result.get(0).getValue());
+                    }
+                }
+            } else {
+                Map<String, OnnxTensor> inputs = new HashMap<>();
+                inputs.put("trajectory", trajectoryTensor);
+                inputs.put("mask", maskTensor);
+                try (OrtSession.Result result = encoder.run(inputs)) {
+                    x = flatten3d(result.get(0).getValue());
+                    if (usesSpatial) {
+                        spatial = flatten2d(result.get(1).getValue());
+                    }
                 }
             }
         }
 
-        long[] xShape = {1L, hiddenDim, time};
-        long[] candidateIds = resolveCandidateIds(candidateWhitelist);
-        long[] candShape = {1L, candidateIds.length};
-
-        float[] logits = null;
-        for (OrtSession block : blocks) {
-            try (OnnxTensor xTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(x), xShape);
-                 OnnxTensor maskTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(maskFlat), maskShape);
-                 OnnxTensor candTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(candidateIds), candShape)) {
-                Map<String, OnnxTensor> inputs = new HashMap<>();
-                inputs.put("x", xTensor);
-                inputs.put("mask", maskTensor);
-                inputs.put("candidate_ids", candTensor);
-                if (spatial == null) {
-                    try (OrtSession.Result result = block.run(inputs)) {
-                        x = flatten3d(result.get(0).getValue());
-                        logits = flatten2d(result.get(1).getValue());
-                    }
-                } else {
-                    long[] spatialShape = {1L, spatial.length};
-                    try (OnnxTensor spatialTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(spatial), spatialShape)) {
-                        inputs.put("spatial", spatialTensor);
+        if (singleModel == null) {
+            long[] xShape = {1L, hiddenDim, time};
+            for (OrtSession block : blocks) {
+                try (OnnxTensor xTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(x), xShape);
+                     OnnxTensor maskTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(maskFlat), maskShape);
+                     OnnxTensor candTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(candidateIds), candShape)) {
+                    Map<String, OnnxTensor> inputs = new HashMap<>();
+                    inputs.put("x", xTensor);
+                    inputs.put("mask", maskTensor);
+                    inputs.put("candidate_ids", candTensor);
+                    if (spatial == null) {
                         try (OrtSession.Result result = block.run(inputs)) {
                             x = flatten3d(result.get(0).getValue());
                             logits = flatten2d(result.get(1).getValue());
+                        }
+                    } else {
+                        long[] spatialShape = {1L, spatial.length};
+                        try (OnnxTensor spatialTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(spatial), spatialShape)) {
+                            inputs.put("spatial", spatialTensor);
+                            try (OrtSession.Result result = block.run(inputs)) {
+                                x = flatten3d(result.get(0).getValue());
+                                logits = flatten2d(result.get(1).getValue());
+                            }
                         }
                     }
                 }
@@ -331,7 +352,8 @@ public final class OnnxTrajectoryOcrEngine implements TrajectoryOcrEngine {
         for (OrtSession block : blocks) {
             block.close();
         }
-        encoder.close();
+        if (encoder != null) encoder.close();
+        if (singleModel != null) singleModel.close();
     }
 }
 

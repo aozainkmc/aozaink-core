@@ -30,7 +30,7 @@ public final class AozaiInkCommand {
     private static final int SELFTEST_IMAGE_SIZE = 64;
     private static final String SELFTEST_IMAGE_SOURCE = "__aozaink_selftest_image";
     private static final String SELFTEST_TRAJECTORY_SOURCE = "__aozaink_selftest_trajectory";
-    private static final String TRAJECTORY_MODEL_DIR = "/assets/aozaink_core/ocr/olsingle16";
+    private static final String TRAJECTORY_MODEL_DIR = "/assets/aozaink_core/ocr/olsingle24";
     private static final int TRAJECTORY_MAX_POINTS = 256;
     private static final float TRAJECTORY_SIMPLIFY_EPS = 0.018f;
     private static final String TRAJECTORY_PROGRESS_MODE = "arc";

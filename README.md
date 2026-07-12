@@ -1,5 +1,7 @@
 # aozaink-core
 
+开发工程名为 `aozaink-core`；面向玩家的发布产物名为 `molu-core`。
+
 手写汉字识别内核。这是 Aozai Ink 唯一的官方维护模块。
 
 ## 职责
@@ -46,16 +48,16 @@ AozaiInkCoreApi.recognizer().recognize(request);
 
 ### EngineType.ONLINE_TRAJECTORY
 
-- 使用 olsingle16 轨迹模型 `assets/aozaink_core/ocr/olsingle16/`。
+- 使用 olsingle24 轨迹模型 `assets/aozaink_core/ocr/olsingle24/`。
 - 输入为归一化笔迹 `InkTrace`，core 内部做 RDP 简化、resample、6-dim 特征提取。
-- 模型结构：`encoder.onnx` 输出 `x` 和 `spatial`；`block_1.onnx`、`block_2.onnx` 顺序执行并接收 `spatial`。
+- 模型结构：单个 `candidate_dynamic.onnx`，直接接收 `trajectory`、`mask`、`candidate_ids`，输出候选 logits；不再使用多出口或分段 block。
 - 推理时把 `candidateWhitelist` 或已注册字集转成 `candidate_ids` 传入模型，模型只输出这些字的概率。
 
 ## 引擎按需启动
 
 - core 在 `FMLCommonSetupEvent` 时根据 `registerInput` 的结果决定加载哪些 ONNX session。
 - 只注册了 `OFFLINE_IMAGE` 就只加载 `cup_ocr_64.onnx`。
-- 只注册了 `ONLINE_TRAJECTORY` 就只加载 `olsingle16` 的 encoder + blocks。
+- 只注册了 `ONLINE_TRAJECTORY` 就只加载 `olsingle24` 的单个 ONNX session。
 - 都没注册则两个引擎都不加载，节省内存和启动时间。
 - 首次使用对应引擎前已加载完成，避免第一次推理卡顿。
 
@@ -155,7 +157,7 @@ dependencies {
 ## 模型文件
 
 - 离线图片：`assets/aozaink_core/ocr/cup_ocr_64.onnx`、`assets/aozaink_core/ocr/labels.json`
-- 在线轨迹：`assets/aozaink_core/ocr/olsingle16/encoder.onnx`、`block_1.onnx`、`block_2.onnx`、`meta.json`、`vocab.json`
+- 在线轨迹：`assets/aozaink_core/ocr/olsingle24/candidate_dynamic.onnx`、`meta.json`、`vocab.json`
 
 ## 兼容性承诺
 

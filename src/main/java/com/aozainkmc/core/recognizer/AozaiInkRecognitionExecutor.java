@@ -37,6 +37,7 @@ public final class AozaiInkRecognitionExecutor {
     private final ThreadPoolExecutor executor;
     private final AtomicInteger queued = new AtomicInteger(0);
     private final Map<UUID, Long> lastSubmitMs = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> latestRevisions = new ConcurrentHashMap<>();
     private final AtomicInteger threadCounter = new AtomicInteger(0);
 
     private AozaiInkRecognitionExecutor() {
@@ -90,7 +91,7 @@ public final class AozaiInkRecognitionExecutor {
         RecognitionCallback onSuccess,
         FailureCallback onFailure
     ) {
-        return submitInternal(player, request, true, onSuccess, onFailure);
+        return submitInternal(player, request, true, null, onSuccess, onFailure);
     }
 
     /**
@@ -104,7 +105,24 @@ public final class AozaiInkRecognitionExecutor {
         RecognitionCallback onSuccess,
         FailureCallback onFailure
     ) {
-        return submitInternal(player, request, false, onSuccess, onFailure);
+        return submitInternal(player, request, false, null, onSuccess, onFailure);
+    }
+
+    /** Queues a replaceable preview; older queued revisions are skipped before inference. */
+    public boolean submitLatest(
+        ServerPlayer player,
+        InkRecognitionRequest request,
+        long revision,
+        RecognitionCallback onSuccess,
+        FailureCallback onFailure
+    ) {
+        supersedeLatest(player, revision);
+        return submitInternal(player, request, false, revision, onSuccess, onFailure);
+    }
+
+    /** Marks every lower preview revision as obsolete, including when a final request arrives. */
+    public void supersedeLatest(ServerPlayer player, long revision) {
+        latestRevisions.merge(player.getUUID(), revision, Math::max);
     }
 
     public boolean tryAcquireCooldown(ServerPlayer player) {
@@ -115,6 +133,7 @@ public final class AozaiInkRecognitionExecutor {
         ServerPlayer player,
         InkRecognitionRequest request,
         boolean enforceCooldown,
+        Long replaceableRevision,
         RecognitionCallback onSuccess,
         FailureCallback onFailure
     ) {
@@ -136,6 +155,14 @@ public final class AozaiInkRecognitionExecutor {
 
         try {
             executor.execute(() -> {
+                if (replaceableRevision != null
+                        && latestRevisions.getOrDefault(player.getUUID(), replaceableRevision) > replaceableRevision) {
+                    scheduleOnServer(player, () -> {
+                        queued.decrementAndGet();
+                        onFailure.onFailure("superseded");
+                    });
+                    return;
+                }
                 try {
                     InkRecognitionResult result = AozaiInkCoreApi.recognizer().recognize(request);
                     scheduleOnServer(player, () -> {
