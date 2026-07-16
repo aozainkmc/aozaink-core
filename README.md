@@ -24,10 +24,7 @@
 ```java
 import com.aozainkmc.core.AozaiInkCoreApi;
 
-// 注册输入模块使用的引擎类型
-AozaiInkCoreApi.registerInput("classic_taiji_traj", EngineType.ONLINE_TRAJECTORY);
-
-// 注册玩法关心的字，在线引擎推理时只在这些字里选
+// 注册玩法关心的字，统一模型推理时只在这些字里选
 AozaiInkCoreApi.registerGlyphs(Set.of("火", "镇", "封"));
 
 // 查询字灵存储
@@ -37,29 +34,14 @@ AozaiInkCoreApi.markStore().marksOn(target);
 AozaiInkCoreApi.recognizer().recognize(request);
 ```
 
-## 引擎类型
+## 统一识别引擎
 
-### EngineType.OFFLINE_IMAGE
-
-- 使用旧 CNN 图片模型 `assets/aozaink_core/ocr/cup_ocr_64.onnx`。
-- 输入为 64×64 灰度浮点数组。
-- 输出为全词表 softmax，core 只过滤保留汉字脚本（Unicode HAN）后取 Top-K。
-- `candidateWhitelist` 不会传给模型， gameplay 需要在 `InkRecognizedEvent` 里自行过滤。
-
-### EngineType.ONLINE_TRAJECTORY
-
-- 使用 olsingle24 轨迹模型 `assets/aozaink_core/ocr/olsingle24/`。
-- 输入为归一化笔迹 `InkTrace`，core 内部做 RDP 简化、resample、6-dim 特征提取。
-- 模型结构：单个 `candidate_dynamic.onnx`，直接接收 `trajectory`、`mask`、`candidate_ids`，输出候选 logits；不再使用多出口或分段 block。
-- 推理时把 `candidateWhitelist` 或已注册字集转成 `candidate_ids` 传入模型，模型只输出这些字的概率。
-
-## 引擎按需启动
-
-- core 在 `FMLCommonSetupEvent` 时根据 `registerInput` 的结果决定加载哪些 ONNX session。
-- 只注册了 `OFFLINE_IMAGE` 就只加载 `cup_ocr_64.onnx`。
-- 只注册了 `ONLINE_TRAJECTORY` 就只加载 `olsingle24` 的单个 ONNX session。
-- 都没注册则两个引擎都不加载，节省内存和启动时间。
-- 首次使用对应引擎前已加载完成，避免第一次推理卡顿。
+- Core 只加载 `mix_flash_v1/unified_dynamic.onnx` 一个 ONNX Session，图片与轨迹共享模型参数、7356 类词表和 candidate Engram。
+- 请求包含 `imageInput` 时自动走图片输出；否则有非空 `trace` 时自动走轨迹输出。不存在玩家或输入模块可选择的引擎模式。
+- 图片输入是 64×64 浅底深字灰度浮点数组，按 `pixel / 127.5 - 1` 归一化到 `[-1,1]`。
+- 轨迹输入由 Core 做 RDP `0.018` 简化、最多 256 点重采样和 `[dx,dy,pen,x,y,progress]` 六维特征提取；ONNX 接收实际点数，不补零到 256。
+- `candidateWhitelist` 或已注册字集会转成 `candidate_ids` 直接传给模型，两种输入都只输出候选集合内的 logits。
+- 模型在 `FMLCommonSetupEvent` 初始化，首次玩家识别不再创建新 Session。
 
 ## 核心类型
 
@@ -67,9 +49,8 @@ AozaiInkCoreApi.recognizer().recognize(request);
 
 ```java
 record InkRecognitionRequest(
-    InkTrace trace,                    // 归一化笔迹（在线引擎使用）
-    float[] imageInput,                // 64x64 灰度浮点数组（离线引擎使用）
-    InkRecognitionMode mode,           // ONLINE / OFFLINE / HYBRID（保留）
+    InkTrace trace,                    // 轨迹输入；imageInput 为空时使用
+    float[] imageInput,                // 64x64 灰度浮点数组；非空时优先使用
     List<String> candidateWhitelist,   // 白名单；空=使用 registerGlyphs 注册的字
     long ttlTicks,                     // 标记存活时间
     InkSource source                   // 透传元数据
@@ -83,13 +64,13 @@ record InkRecognitionResult(
     String topGlyph,              // 排名第一的字
     float confidence,             // top1 置信度
     List<InkCandidate> candidates, // 候选字列表
-    int simplifiedStrokeCount,    // 简化后笔画数（仅在线引擎有效）
-    int simplifiedPointCount,     // 简化后总点数（仅在线引擎有效）
-    long writingDurationMs        // 书写耗时（仅在线引擎有效）
+    int simplifiedStrokeCount,    // 简化后笔画数（仅轨迹输入有效）
+    int simplifiedPointCount,     // 简化后总点数（仅轨迹输入有效）
+    long writingDurationMs        // 书写耗时（仅轨迹输入有效）
 )
 ```
 
-离线图片引擎的 `simplifiedStrokeCount`、`simplifiedPointCount`、`writingDurationMs` 固定为 0。
+图片输入的 `simplifiedStrokeCount`、`simplifiedPointCount`、`writingDurationMs` 固定为 0。
 
 ### 透传：InkSource
 
@@ -156,12 +137,10 @@ dependencies {
 
 ## 模型文件
 
-- 离线图片：`assets/aozaink_core/ocr/cup_ocr_64.onnx`、`assets/aozaink_core/ocr/labels.json`
-- 在线轨迹：`assets/aozaink_core/ocr/olsingle24/candidate_dynamic.onnx`、`meta.json`、`vocab.json`
+- `assets/aozaink_core/ocr/mix_flash_v1/unified_dynamic.onnx`
+- `assets/aozaink_core/ocr/mix_flash_v1/meta.json`
+- `assets/aozaink_core/ocr/mix_flash_v1/vocab.json`
 
-## 兼容性承诺
+## API 兼容策略
 
-- 所有 `com.aozainkmc.core.api.*` 的公开类型在 `0.x` 范围内向后兼容
-- 事件结构新增字段不删旧字段
-- `InkSource.extra` 是预留扩展槽，永不删除
-- `InkMarkStore` 接口稳定，不增删方法
+alpha 阶段与 `0.1.0` 发布后的接口演进规则见根目录 [`API_COMPATIBILITY.md`](../API_COMPATIBILITY.md)。

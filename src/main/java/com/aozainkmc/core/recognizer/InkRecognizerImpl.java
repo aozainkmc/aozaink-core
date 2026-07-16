@@ -1,7 +1,6 @@
 package com.aozainkmc.core.recognizer;
 
 import com.aozainkmc.core.AozaiInkCoreApi;
-import com.aozainkmc.core.api.EngineType;
 import com.aozainkmc.core.api.InkCandidate;
 import com.aozainkmc.core.api.InkMark;
 import com.aozainkmc.core.api.InkRecognitionRequest;
@@ -13,7 +12,6 @@ import com.aozainkmc.core.api.InkTrace;
 import com.aozainkmc.core.dev.AozaiInkDevMode;
 import com.aozainkmc.core.ocr.DebugDump;
 import com.aozainkmc.core.ocr.OcrEngine;
-import com.aozainkmc.core.ocr.TrajectoryOcrEngine;
 import com.aozainkmc.core.ocr.TrajectoryResult;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,28 +26,27 @@ public final class InkRecognizerImpl implements InkRecognizer {
         boolean previousDump = DebugDump.isEnabled();
         DebugDump.setEnabled(request.devMode());
         try {
-            EngineType type = AozaiInkCoreApi.engineTypeFor(request.source().sourceId());
-            if (type == EngineType.ONLINE_TRAJECTORY) {
-                return recognizeTrajectory(request);
+            if (request.imageInput() != null) {
+                return recognizeImage(request);
             }
-            return recognizeImage(request);
+            return recognizeTrajectory(request);
         } finally {
             DebugDump.setEnabled(previousDump);
         }
     }
 
     private static InkRecognitionResult recognizeImage(InkRecognitionRequest request) throws Exception {
-        OcrEngine engine = AozaiInkCoreApi.imageEngine();
-        if (engine == null || request.imageInput() == null) {
+        OcrEngine engine = AozaiInkCoreApi.engine();
+        if (engine == null) {
             return InkRecognitionResult.empty();
         }
 
-        List<InkCandidate> candidates = engine.recognize(request.imageInput(), 5, candidateList(request));
+        List<InkCandidate> candidates = engine.recognizeImage(request.imageInput(), candidateList(request));
         return toResult(candidates);
     }
 
     private static InkRecognitionResult recognizeTrajectory(InkRecognitionRequest request) throws Exception {
-        TrajectoryOcrEngine engine = AozaiInkCoreApi.trajectoryEngine();
+        OcrEngine engine = AozaiInkCoreApi.engine();
         if (engine == null || request.trace() == null || request.trace().isEmpty()) {
             return InkRecognitionResult.empty();
         }
@@ -79,9 +76,8 @@ public final class InkRecognizerImpl implements InkRecognizer {
             return InkRecognitionResult.empty();
         }
         InkCandidate top = result.candidates().getFirst();
-        String word = StrokeCountGlyphPatch.correct(top.word(), result.simplifiedStrokeCount());
         return new InkRecognitionResult(
-            word,
+            top.word(),
             top.confidence(),
             result.candidates(),
             result.simplifiedStrokeCount(),
@@ -97,7 +93,7 @@ public final class InkRecognizerImpl implements InkRecognizer {
         ServerPlayer player
     ) throws Exception {
         InkRecognitionRequest devAware = new InkRecognitionRequest(
-            request.trace(), request.imageInput(), request.mode(),
+            request.trace(), request.imageInput(),
             request.candidateWhitelist(), request.ttlTicks(), request.source(),
             AozaiInkDevMode.isEnabled(player));
         InkRecognitionResult result = recognize(devAware);

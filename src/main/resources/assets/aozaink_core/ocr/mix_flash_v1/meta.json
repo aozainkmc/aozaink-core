@@ -1,0 +1,47 @@
+{
+  "format": "mixsingle_unified_dynamic_candidate_engram_v1",
+  "checkpoint": "best_qualified.pt",
+  "weights": "ema_model",
+  "model": "unified_dynamic.onnx",
+  "profile": "flash",
+  "num_glyphs": 7356,
+  "image": {
+    "input": "image",
+    "output": "image_logits",
+    "shape": [
+      1,
+      1,
+      64,
+      64
+    ],
+    "light_background": true,
+    "crop_to_ink": true,
+    "padding_ratio": 0.06,
+    "resize": "bilinear",
+    "normalize": "pixel / 127.5 - 1.0"
+  },
+  "trajectory": {
+    "input": "trajectory",
+    "mask": "mask",
+    "output": "trajectory_logits",
+    "feature_order": [
+      "dx",
+      "dy",
+      "pen",
+      "x",
+      "y",
+      "progress"
+    ],
+    "max_points": 256,
+    "simplify_eps": 0.018,
+    "progress_mode": "arc",
+    "actual_dynamic_time": true
+  },
+  "candidate_input": "candidate_ids",
+  "candidate_neighbor_count": 6,
+  "dynamic_axes": {
+    "batch": true,
+    "time": true,
+    "num_candidates": true
+  }
+}

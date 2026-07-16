@@ -13,7 +13,7 @@ import java.time.format.DateTimeFormatter;
 
 public final class DebugDump {
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
-    private static final int OFFLINE_SIZE = 64;
+    private static final int IMAGE_SIZE = 64;
     private static final int TRAJECTORY_SIZE = 256;
     private static final int TRAJECTORY_PADDING = 18;
     private static final ThreadLocal<Boolean> ENABLED = ThreadLocal.withInitial(() -> true);
@@ -29,25 +29,25 @@ public final class DebugDump {
         ENABLED.set(enabled);
     }
 
-    public static void offlineImageInput(float[] input) {
+    public static void imageInput(float[] input) {
         if (!isEnabled()) {
             return;
         }
-        if (input == null || input.length != OFFLINE_SIZE * OFFLINE_SIZE) {
+        if (input == null || input.length != IMAGE_SIZE * IMAGE_SIZE) {
             return;
         }
-        byte[] rgb = new byte[OFFLINE_SIZE * OFFLINE_SIZE * 3];
-        for (int y = 0; y < OFFLINE_SIZE; y++) {
-            for (int x = 0; x < OFFLINE_SIZE; x++) {
-                float value = input[y * OFFLINE_SIZE + x];
+        byte[] rgb = new byte[IMAGE_SIZE * IMAGE_SIZE * 3];
+        for (int y = 0; y < IMAGE_SIZE; y++) {
+            for (int x = 0; x < IMAGE_SIZE; x++) {
+                float value = input[y * IMAGE_SIZE + x];
                 int gray = clamp(Math.round((value + 1.0f) * 127.5f), 0, 255);
-                setRgb(rgb, OFFLINE_SIZE, x, y, gray, gray, gray);
+                setRgb(rgb, IMAGE_SIZE, x, y, gray, gray, gray);
             }
         }
-        writeBmp("offline-image", OFFLINE_SIZE, OFFLINE_SIZE, rgb);
+        writeBmp("image", IMAGE_SIZE, IMAGE_SIZE, rgb);
     }
 
-    public static void onlineTrajectoryInput(float[][] features) {
+    public static void trajectoryInput(float[][] features) {
         if (!isEnabled()) {
             return;
         }
@@ -92,18 +92,18 @@ public final class DebugDump {
                 drawPoint(rgb, TRAJECTORY_SIZE, x, y, 29, 95, 184, 5);
             }
         }
-        writeBmp("online-trajectory", TRAJECTORY_SIZE, TRAJECTORY_SIZE, rgb);
+        writeBmp("trajectory", TRAJECTORY_SIZE, TRAJECTORY_SIZE, rgb);
         writeTrajectoryCsv(features);
     }
 
-    public static void onlineCandidates(List<InkCandidate> candidates, String label) {
+    public static void candidates(List<InkCandidate> candidates, String label) {
         if (!isEnabled()) {
             return;
         }
         if (candidates == null || candidates.isEmpty()) {
             return;
         }
-        StringBuilder line = new StringBuilder("AozaiInk online candidates [").append(label).append("]:");
+        StringBuilder line = new StringBuilder("AozaiInk candidates [").append(label).append("]:");
         int count = Math.min(8, candidates.size());
         for (int i = 0; i < count; i++) {
             InkCandidate c = candidates.get(i);
@@ -117,7 +117,7 @@ public final class DebugDump {
         try {
             Path dir = debugDir();
             Files.createDirectories(dir);
-            Path path = dir.resolve("online-trajectory-" + LocalDateTime.now().format(STAMP) + ".csv");
+            Path path = dir.resolve("trajectory-" + LocalDateTime.now().format(STAMP) + ".csv");
             StringBuilder out = new StringBuilder("i,dx,dy,pen,x,y,progress\n");
             for (int i = 0; i < features.length; i++) {
                 float[] f = features[i];

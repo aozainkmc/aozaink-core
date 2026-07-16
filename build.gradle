@@ -47,6 +47,10 @@ runs {
     client {
         systemProperty "neoforge.enabledGameTestNamespaces", project.mod_id
     }
+
+    server {
+        arguments.add("--nogui")
+    }
 }
 
 dependencies {

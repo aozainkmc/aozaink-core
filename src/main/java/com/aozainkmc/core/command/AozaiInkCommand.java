@@ -1,19 +1,16 @@
 package com.aozainkmc.core.command;
 
 import com.aozainkmc.core.AozaiInkCoreApi;
-import com.aozainkmc.core.api.EngineType;
 import com.aozainkmc.core.api.InkCandidate;
 import com.aozainkmc.core.api.InkMark;
 import com.aozainkmc.core.api.InkPoint;
-import com.aozainkmc.core.api.InkRecognitionMode;
 import com.aozainkmc.core.api.InkRecognitionRequest;
 import com.aozainkmc.core.api.InkRecognitionResult;
 import com.aozainkmc.core.api.InkSource;
 import com.aozainkmc.core.api.InkTrace;
 import com.aozainkmc.core.dev.AozaiInkDevMode;
 import com.aozainkmc.core.ocr.OcrEngine;
-import com.aozainkmc.core.ocr.OnnxOcrEngine;
-import com.aozainkmc.core.ocr.OnnxTrajectoryOcrEngine;
+import com.aozainkmc.core.ocr.OnnxUnifiedOcrEngine;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -30,11 +27,6 @@ public final class AozaiInkCommand {
     private static final int SELFTEST_IMAGE_SIZE = 64;
     private static final String SELFTEST_IMAGE_SOURCE = "__aozaink_selftest_image";
     private static final String SELFTEST_TRAJECTORY_SOURCE = "__aozaink_selftest_trajectory";
-    private static final String TRAJECTORY_MODEL_DIR = "/assets/aozaink_core/ocr/olsingle24";
-    private static final int TRAJECTORY_MAX_POINTS = 256;
-    private static final float TRAJECTORY_SIMPLIFY_EPS = 0.018f;
-    private static final String TRAJECTORY_PROGRESS_MODE = "arc";
-
     private AozaiInkCommand() {}
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
@@ -53,10 +45,10 @@ public final class AozaiInkCommand {
                     .executes(wrapDev(AozaiInkCommand::prune)))
                 .then(Commands.literal("selftest")
                     .executes(wrapDev(AozaiInkCommand::selftest))
-                    .then(Commands.literal("offline")
-                        .executes(wrapDev(AozaiInkCommand::selftestOffline)))
-                    .then(Commands.literal("online")
-                        .executes(wrapDev(AozaiInkCommand::selftestOnline))))
+                    .then(Commands.literal("image")
+                        .executes(wrapDev(AozaiInkCommand::selftestImage)))
+                    .then(Commands.literal("trajectory")
+                        .executes(wrapDev(AozaiInkCommand::selftestTrajectory))))
                 .then(Commands.literal("help")
                     .executes(wrapDev(AozaiInkCommand::help)))
         );
@@ -138,50 +130,43 @@ public final class AozaiInkCommand {
     }
 
     private static int selftest(CommandContext<CommandSourceStack> ctx) {
-        int offline = selftestOffline(ctx);
-        int online = selftestOnline(ctx);
-        return offline + online;
+        int image = selftestImage(ctx);
+        int trajectory = selftestTrajectory(ctx);
+        return image + trajectory;
     }
 
-    private static int selftestOffline(CommandContext<CommandSourceStack> ctx) {
+    private static int selftestImage(CommandContext<CommandSourceStack> ctx) {
         try {
-            AozaiInkCoreApi.registerInput(SELFTEST_IMAGE_SOURCE, EngineType.OFFLINE_IMAGE);
-            if (AozaiInkCoreApi.imageEngine() == null) {
-                AozaiInkCoreApi.installImageEngine(new OnnxOcrEngine());
+            if (AozaiInkCoreApi.engine() == null) {
+                AozaiInkCoreApi.installEngine(new OnnxUnifiedOcrEngine());
             }
-            List<InkCandidate> candidates = AozaiInkCoreApi.imageEngine().recognize(builtinTestImage(), 5, Collections.emptyList());
-            return printCandidates(ctx, "Selftest offline image", candidates);
+            List<InkCandidate> candidates = AozaiInkCoreApi.engine()
+                .recognizeImage(builtinTestImage(), Collections.emptyList());
+            return printCandidates(ctx, "Selftest unified image", candidates);
         } catch (Exception e) {
-            ctx.getSource().sendFailure(Component.literal("[AozaiInk] Selftest offline image 异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
+            ctx.getSource().sendFailure(Component.literal("[AozaiInk] Selftest image 异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
             return 0;
         }
     }
 
-    private static int selftestOnline(CommandContext<CommandSourceStack> ctx) {
+    private static int selftestTrajectory(CommandContext<CommandSourceStack> ctx) {
         try {
-            AozaiInkCoreApi.registerInput(SELFTEST_TRAJECTORY_SOURCE, EngineType.ONLINE_TRAJECTORY);
             AozaiInkCoreApi.registerGlyphs(List.of("一", "二", "三", "火", "水", "木", "口", "人"));
-            if (AozaiInkCoreApi.trajectoryEngine() == null) {
-                AozaiInkCoreApi.installTrajectoryEngine(new OnnxTrajectoryOcrEngine(
-                    TRAJECTORY_MODEL_DIR,
-                    TRAJECTORY_MAX_POINTS,
-                    TRAJECTORY_SIMPLIFY_EPS,
-                    TRAJECTORY_PROGRESS_MODE
-                ));
+            if (AozaiInkCoreApi.engine() == null) {
+                AozaiInkCoreApi.installEngine(new OnnxUnifiedOcrEngine());
             }
 
             InkRecognitionRequest request = new InkRecognitionRequest(
                 builtinTestTrace(),
                 null,
-                InkRecognitionMode.ONLINE,
                 List.of("一", "二", "三", "火", "水", "木", "口", "人"),
                 12000L,
                 new InkSource(SELFTEST_TRAJECTORY_SOURCE, 1.0f, "selftest", 0.0f, Map.of())
             );
             InkRecognitionResult result = AozaiInkCoreApi.recognizer().recognize(request);
-            return printCandidates(ctx, "Selftest online trajectory", result.candidates());
+            return printCandidates(ctx, "Selftest unified trajectory", result.candidates());
         } catch (Exception e) {
-            ctx.getSource().sendFailure(Component.literal("[AozaiInk] Selftest online trajectory 异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
+            ctx.getSource().sendFailure(Component.literal("[AozaiInk] Selftest trajectory 异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
             return 0;
         }
     }
@@ -206,17 +191,17 @@ public final class AozaiInkCommand {
     private static float[] builtinTestImage() {
         float[] image = new float[SELFTEST_IMAGE_SIZE * SELFTEST_IMAGE_SIZE];
         for (int i = 0; i < image.length; i++) {
-            image[i] = -1.0f;
+            image[i] = 1.0f;
         }
 
         for (int y = 29; y <= 34; y++) {
             for (int x = 10; x <= 53; x++) {
-                image[y * SELFTEST_IMAGE_SIZE + x] = 1.0f;
+                image[y * SELFTEST_IMAGE_SIZE + x] = -0.75f;
             }
         }
         for (int y = 27; y <= 36; y++) {
-            image[y * SELFTEST_IMAGE_SIZE + 10] = 0.4f;
-            image[y * SELFTEST_IMAGE_SIZE + 53] = 0.4f;
+            image[y * SELFTEST_IMAGE_SIZE + 10] = -0.4f;
+            image[y * SELFTEST_IMAGE_SIZE + 53] = -0.4f;
         }
         return image;
     }
@@ -249,11 +234,11 @@ public final class AozaiInkCommand {
         ctx.getSource().sendSuccess(() ->
             Component.literal("  /aozaink prune - 清理过期字灵"), false);
         ctx.getSource().sendSuccess(() ->
-            Component.literal("  /aozaink selftest - 验证离线图片和在线轨迹 OCR"), false);
+            Component.literal("  /aozaink selftest - 验证统一模型的图片和轨迹 OCR"), false);
         ctx.getSource().sendSuccess(() ->
-            Component.literal("  /aozaink selftest offline - 只验证离线图片 OCR"), false);
+            Component.literal("  /aozaink selftest image - 只验证图片输入"), false);
         ctx.getSource().sendSuccess(() ->
-            Component.literal("  /aozaink selftest online - 只验证在线轨迹 OCR"), false);
+            Component.literal("  /aozaink selftest trajectory - 只验证轨迹输入"), false);
         return 0;
     }
 }
