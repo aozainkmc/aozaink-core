@@ -74,7 +74,9 @@ actual_eigen_commit="$(git -C "$EIGEN_SOURCE" rev-parse HEAD)"
   --disable_types float8 \
   --enable_lto \
   --compile_no_warning_as_error \
-  --cmake_extra_defines "FETCHCONTENT_SOURCE_DIR_EIGEN=$EIGEN_SOURCE"
+  --cmake_extra_defines \
+    "FETCHCONTENT_SOURCE_DIR_EIGEN=$EIGEN_SOURCE" \
+    "CMAKE_POLICY_VERSION_MINIMUM=3.5"
 
 built_jar="$ORT_SOURCE/java/build/libs/onnxruntime-$ORT_VERSION.jar"
 test -f "$built_jar" || { echo "Built runtime JAR was not found: $built_jar" >&2; exit 1; }
