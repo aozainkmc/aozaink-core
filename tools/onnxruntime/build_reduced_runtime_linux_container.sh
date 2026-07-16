@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="${LINUX_RUNTIME_IMAGE:-eclipse-temurin:21-jdk-focal}"
+IMAGE="${LINUX_RUNTIME_IMAGE:-ubuntu:20.04}"
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
+: "${JAVA_HOME:?JAVA_HOME must point to a host JDK 21 installation}"
 
 docker run --rm \
   -e DEBIAN_FRONTEND=noninteractive \
@@ -11,11 +12,14 @@ docker run --rm \
   -e HOST_GID="$HOST_GID" \
   -e PARALLEL="${PARALLEL:-4}" \
   -e PYTHON=python3 \
+  -v "$JAVA_HOME:/jdk:ro" \
   -v "$PWD:/workspace" \
   -w /workspace \
   "$IMAGE" \
   bash -lc '
     set -euo pipefail
+    export JAVA_HOME=/jdk
+    export PATH="$JAVA_HOME/bin:$PATH"
     apt-get update
     apt-get install -y --no-install-recommends \
       binutils \
