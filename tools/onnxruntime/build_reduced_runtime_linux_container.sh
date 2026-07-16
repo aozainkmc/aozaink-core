@@ -35,7 +35,13 @@ docker run --rm \
       python3-pip \
       unzip \
       zip
+    update-ca-certificates -f
     python3 -m pip install --disable-pip-version-check "cmake<4" flatbuffers
-    CC=gcc-10 CXX=g++-10 PARALLEL="${PARALLEL:-4}" PYTHON=python3 ALLOW_RUNNING_AS_ROOT=1 bash tools/onnxruntime/build_reduced_runtime_unix.sh
+    export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts ${JAVA_TOOL_OPTIONS:-}"
+    if [[ "$(uname -m)" == "aarch64" || "$(uname -m)" == "arm64" ]]; then
+      export CC=gcc-10
+      export CXX=g++-10
+    fi
+    PARALLEL="${PARALLEL:-4}" PYTHON=python3 ALLOW_RUNNING_AS_ROOT=1 bash tools/onnxruntime/build_reduced_runtime_unix.sh
     chown -R "$HOST_UID:$HOST_GID" build runtime
   '
