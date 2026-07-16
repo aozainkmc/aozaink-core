@@ -46,10 +46,8 @@ if ($LASTEXITCODE -ne 0 -or $actualOrtCommit -ne $OrtTag) {
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $EigenSource ".git"))) {
-    & git clone --filter=blob:none --no-checkout https://gitlab.com/libeigen/eigen.git $EigenSource
+    & git clone --filter=blob:none --no-checkout https://chromium.googlesource.com/external/gitlab.com/libeigen/eigen $EigenSource
     if ($LASTEXITCODE -ne 0) { throw "Failed to clone Eigen" }
-    & git -C $EigenSource fetch --depth 1 origin $EigenCommit
-    if ($LASTEXITCODE -ne 0) { throw "Failed to fetch pinned Eigen commit" }
     & git -C $EigenSource checkout --detach $EigenCommit
     if ($LASTEXITCODE -ne 0) { throw "Failed to check out pinned Eigen commit" }
 }

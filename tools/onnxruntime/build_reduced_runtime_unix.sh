@@ -51,8 +51,8 @@ actual_ort_tag="$(git -C "$ORT_SOURCE" describe --tags --exact-match)"
 }
 
 if [[ ! -d "$EIGEN_SOURCE/.git" ]]; then
-  git clone --filter=blob:none --no-checkout https://gitlab.com/libeigen/eigen.git "$EIGEN_SOURCE"
-  git -C "$EIGEN_SOURCE" fetch --depth 1 origin "$EIGEN_COMMIT"
+  git clone --filter=blob:none --no-checkout \
+    https://chromium.googlesource.com/external/gitlab.com/libeigen/eigen "$EIGEN_SOURCE"
   git -C "$EIGEN_SOURCE" checkout --detach "$EIGEN_COMMIT"
 fi
 actual_eigen_commit="$(git -C "$EIGEN_SOURCE" rev-parse HEAD)"
