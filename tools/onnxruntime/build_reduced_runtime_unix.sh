@@ -36,6 +36,9 @@ command -v cmake >/dev/null
 command -v java >/dev/null
 command -v javac >/dev/null
 command -v jar >/dev/null
+if [[ "$PLATFORM" == linux-* ]]; then
+  command -v readelf >/dev/null
+fi
 
 model_hash_before="$(shasum -a 256 "$MODEL" | awk '{print $1}')"
 mkdir -p "$BUILD_ROOT"
@@ -61,6 +64,18 @@ actual_eigen_commit="$(git -C "$EIGEN_SOURCE" rev-parse HEAD)"
   exit 1
 }
 
+cmake_extra_defines=(
+  "onnxruntime_BUILD_UNIT_TESTS=OFF"
+  "FETCHCONTENT_SOURCE_DIR_EIGEN=$EIGEN_SOURCE"
+  "CMAKE_POLICY_VERSION_MINIMUM=3.5"
+)
+if [[ "$PLATFORM" == linux-* ]]; then
+  cmake_extra_defines+=(
+    "CMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
+    "CMAKE_MODULE_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
+  )
+fi
+
 "$PYTHON" "$ORT_SOURCE/tools/ci_build/build.py" \
   --build_dir "$ORT_BUILD" \
   --config MinSizeRel \
@@ -74,10 +89,7 @@ actual_eigen_commit="$(git -C "$EIGEN_SOURCE" rev-parse HEAD)"
   --disable_types float8 \
   --enable_lto \
   --compile_no_warning_as_error \
-  --cmake_extra_defines \
-    "onnxruntime_BUILD_UNIT_TESTS=OFF" \
-    "FETCHCONTENT_SOURCE_DIR_EIGEN=$EIGEN_SOURCE" \
-    "CMAKE_POLICY_VERSION_MINIMUM=3.5"
+  --cmake_extra_defines "${cmake_extra_defines[@]}"
 
 built_jar="$ORT_SOURCE/java/build/libs/onnxruntime-$ORT_VERSION.jar"
 test -f "$built_jar" || { echo "Built runtime JAR was not found: $built_jar" >&2; exit 1; }
@@ -89,6 +101,28 @@ esac
 jar_entries="$(jar tf "$built_jar")"
 grep -Fxq "ai/onnxruntime/native/$PLATFORM/libonnxruntime.$extension" <<<"$jar_entries"
 grep -Fxq "ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.$extension" <<<"$jar_entries"
+
+if [[ "$PLATFORM" == linux-* ]]; then
+  native_check_dir="$BUILD_ROOT/native-link-check/$PLATFORM"
+  rm -rf "$native_check_dir"
+  mkdir -p "$native_check_dir"
+  (
+    cd "$native_check_dir"
+    jar xf "$built_jar" \
+      "ai/onnxruntime/native/$PLATFORM/libonnxruntime.so" \
+      "ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.so"
+  )
+  for library in \
+    "$native_check_dir/ai/onnxruntime/native/$PLATFORM/libonnxruntime.so" \
+    "$native_check_dir/ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.so"; do
+    dynamic_section="$(readelf -d "$library")"
+    if grep -Eq 'Shared library: \[(libstdc\+\+\.so\.6|libgcc_s\.so\.1)\]' <<<"$dynamic_section"; then
+      echo "Linux runtime still depends on host C++ runtime: $library" >&2
+      echo "$dynamic_section" >&2
+      exit 1
+    fi
+  done
+fi
 
 smoke_classes="$BUILD_ROOT/smoke-classes"
 rm -rf "$smoke_classes"
