@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+
 buildscript {
     repositories {
         maven {
@@ -99,4 +101,116 @@ tasks.named("jar", Jar).configure {
 
 tasks.named("jarJar", Jar).configure {
     archiveClassifier = ""
+}
+
+def universalReducedRuntimeJar = layout.projectDirectory.file(
+    "runtime/reduced/universal/onnxruntime-${project.onnxruntime_version}-reduced.jar"
+)
+def windowsReducedRuntimeJar = layout.projectDirectory.file(
+    "runtime/reduced/win-x64/onnxruntime-${project.onnxruntime_version}-reduced.jar"
+)
+def hasUniversalReducedRuntime = universalReducedRuntimeJar.asFile.exists()
+def reducedRuntimePlatform = hasUniversalReducedRuntime ? "universal" : "win-x64"
+def reducedRuntimeClassifier = hasUniversalReducedRuntime ? "reduced" : "reduced-win-x64"
+def reducedRuntimeArtifact = hasUniversalReducedRuntime
+    ? "onnxruntime-${project.onnxruntime_version}-reduced.jar"
+    : "onnxruntime-${project.onnxruntime_version}-reduced-win-x64.jar"
+def reducedRuntimeJar = hasUniversalReducedRuntime ? universalReducedRuntimeJar : windowsReducedRuntimeJar
+def reducedJarJarDirectory = layout.buildDirectory.dir("generated/reduced-jarjar")
+
+def deleteStaleReducedVariant = tasks.register("deleteStaleReducedVariant", Delete) {
+    def staleClassifier = hasUniversalReducedRuntime ? "reduced-win-x64" : "reduced"
+    delete layout.buildDirectory.file(
+        "libs/${base.archivesName.get()}-${project.version}-${staleClassifier}.jar"
+    )
+}
+
+def prepareReducedJarJarMetadata = tasks.register("prepareReducedJarJarMetadata") {
+    group = "build"
+    description = "Generates NeoForge JarJar metadata for the reduced ONNX Runtime (${reducedRuntimePlatform})."
+    inputs.property("onnxruntimeVersion", project.onnxruntime_version)
+    inputs.property("runtimeArtifact", reducedRuntimeArtifact)
+    outputs.file(reducedJarJarDirectory.map { it.file("metadata.json") })
+
+    doLast {
+        def output = reducedJarJarDirectory.get().file("metadata.json").asFile
+        output.parentFile.mkdirs()
+        output.text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            jars: [[
+                identifier: [
+                    group: "com.microsoft.onnxruntime",
+                    artifact: "onnxruntime-reduced-${reducedRuntimePlatform}"
+                ],
+                version: [
+                    range: "[${project.onnxruntime_version},)",
+                    artifactVersion: project.onnxruntime_version
+                ],
+                path: "META-INF/jarjar/${reducedRuntimeArtifact}",
+                isObfuscated: false
+            ]]
+        ])) + System.lineSeparator()
+    }
+}
+
+def reducedJar = tasks.register("reducedJar", Jar) {
+    group = "build"
+    description = "Builds Core with the model-specific reduced ONNX Runtime (${reducedRuntimePlatform})."
+    archiveClassifier = reducedRuntimeClassifier
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    dependsOn tasks.named("jar")
+    dependsOn prepareReducedJarJarMetadata
+    dependsOn deleteStaleReducedVariant
+    inputs.file(reducedRuntimeJar)
+
+    doFirst {
+        if (!reducedRuntimeJar.asFile.exists()) {
+            throw new GradleException(
+                "Reduced ONNX Runtime is missing: ${reducedRuntimeJar.asFile}. " +
+                "Run tools/onnxruntime/build_reduced_runtime.ps1 first."
+            )
+        }
+    }
+
+    from(tasks.named("jar", Jar).flatMap { it.archiveFile }.map { zipTree(it) }) {
+        exclude "META-INF/MANIFEST.MF"
+        exclude "META-INF/jarjar/**"
+    }
+    from(reducedRuntimeJar) {
+        into "META-INF/jarjar"
+        rename { reducedRuntimeArtifact }
+    }
+    from(reducedJarJarDirectory) {
+        into "META-INF/jarjar"
+    }
+}
+
+artifacts {
+    archives reducedJar
+}
+
+tasks.named("assemble") {
+    dependsOn reducedJar
+}
+
+def reducedRuntimeTest = tasks.register("reducedRuntimeTest", Test) {
+    group = "verification"
+    description = "Runs Core tests against the reduced ONNX Runtime (${reducedRuntimePlatform})."
+    dependsOn tasks.named("testClasses")
+    inputs.file(reducedRuntimeJar)
+
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath.filter {
+        !(it.name == "onnxruntime-${project.onnxruntime_version}.jar")
+    } + files(reducedRuntimeJar)
+    useJUnitPlatform()
+
+    onlyIf {
+        hasUniversalReducedRuntime ||
+            System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+    }
+}
+
+tasks.named("check") {
+    dependsOn reducedRuntimeTest
 }

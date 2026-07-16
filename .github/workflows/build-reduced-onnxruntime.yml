@@ -1,0 +1,97 @@
+name: Build reduced ONNX Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/main/resources/assets/aozaink_core/ocr/mix_flash_v1/unified_dynamic.onnx"
+      - "tools/onnxruntime/**"
+      - ".github/workflows/build-reduced-onnxruntime.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-platform:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            runner: windows-2022
+            shell: pwsh
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            shell: bash
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            shell: bash
+          - platform: osx-x64
+            runner: macos-15-intel
+            shell: bash
+          - platform: osx-aarch64
+            runner: macos-15
+            shell: bash
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build and smoke-test Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          ./tools/onnxruntime/build_reduced_runtime.ps1
+          -Python python
+          -CMakePath cmake
+          -JavaHome $env:JAVA_HOME
+      - name: Build and smoke-test Unix runtime
+        if: runner.os != 'Windows'
+        shell: bash
+        run: PARALLEL=4 bash tools/onnxruntime/build_reduced_runtime_unix.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reduced-runtime-${{ matrix.platform }}
+          path: runtime/reduced/${{ matrix.platform }}/onnxruntime-1.20.0-reduced.jar
+          if-no-files-found: error
+
+  merge:
+    name: Merge universal reduced runtime
+    needs: build-platform
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reduced-runtime-*
+          path: build/reduced-platforms
+      - name: Merge platform JARs
+        run: >-
+          python tools/onnxruntime/merge_runtime_jars.py
+          --output runtime/reduced/universal/onnxruntime-1.20.0-reduced.jar
+          "build/reduced-platforms/**/*.jar"
+      - name: Smoke-test merged runtime on Linux x64
+        run: |
+          mkdir -p build/universal-smoke
+          javac -cp runtime/reduced/universal/onnxruntime-1.20.0-reduced.jar \
+            -d build/universal-smoke tools/onnxruntime/RuntimeSmoke.java
+          java -cp "build/universal-smoke:runtime/reduced/universal/onnxruntime-1.20.0-reduced.jar" \
+            RuntimeSmoke src/main/resources/assets/aozaink_core/ocr/mix_flash_v1/unified_dynamic.onnx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-1.20.0-reduced-universal
+          path: runtime/reduced/universal/onnxruntime-1.20.0-reduced.jar
+          if-no-files-found: error
