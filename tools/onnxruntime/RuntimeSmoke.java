@@ -30,12 +30,18 @@ public final class RuntimeSmoke {
         for (int i = 0; i < image.length; i++) {
             image[i] = ((i * 37) % 251) / 250.0f;
         }
+        float[] trajectory = new float[2 * 6];
+        float[] mask = new float[] {1.0f, 1.0f};
         long[] candidates = candidates();
 
         try (OnnxTensor imageTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(image), new long[]{1, 1, 64, 64});
+             OnnxTensor trajectoryTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(trajectory), new long[]{1, 2, 6});
+             OnnxTensor maskTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(mask), new long[]{1, 2});
              OnnxTensor candidateTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(candidates), new long[]{1, candidates.length})) {
             Map<String, OnnxTensor> inputs = new LinkedHashMap<>();
             inputs.put("image", imageTensor);
+            inputs.put("trajectory", trajectoryTensor);
+            inputs.put("mask", maskTensor);
             inputs.put("candidate_ids", candidateTensor);
             try (OrtSession.Result result = session.run(inputs, java.util.Set.of("image_logits"))) {
                 report("image_logits", (float[][]) result.get("image_logits").orElseThrow().getValue());
@@ -53,14 +59,17 @@ public final class RuntimeSmoke {
                 trajectory[t * 6 + feature] = (float) Math.sin((t + 1) * (feature + 1) * 0.07);
             }
         }
+        float[] image = new float[64 * 64];
         long[] candidates = candidates();
 
-        try (OnnxTensor trajectoryTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(trajectory), new long[]{1, time, 6});
+        try (OnnxTensor imageTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(image), new long[]{1, 1, 64, 64});
+             OnnxTensor trajectoryTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(trajectory), new long[]{1, time, 6});
              OnnxTensor maskTensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(mask), new long[]{1, time});
              OnnxTensor candidateTensor = OnnxTensor.createTensor(environment, LongBuffer.wrap(candidates), new long[]{1, candidates.length})) {
             Map<String, OnnxTensor> inputs = new LinkedHashMap<>();
+            inputs.put("image", imageTensor);
             inputs.put("trajectory", trajectoryTensor);
-            inputs.put("trajectory_mask", maskTensor);
+            inputs.put("mask", maskTensor);
             inputs.put("candidate_ids", candidateTensor);
             try (OrtSession.Result result = session.run(inputs, java.util.Set.of("trajectory_logits"))) {
                 report("trajectory_logits", (float[][]) result.get("trajectory_logits").orElseThrow().getValue());
