@@ -25,14 +25,17 @@ docker run --rm \
       binutils \
       build-essential \
       ca-certificates \
+      ca-certificates-java \
       curl \
+      gcc-10 \
       git \
+      g++-10 \
       perl \
       python3 \
       python3-pip \
       unzip \
       zip
     python3 -m pip install --disable-pip-version-check "cmake<4" flatbuffers
-    PARALLEL="${PARALLEL:-4}" PYTHON=python3 ALLOW_RUNNING_AS_ROOT=1 bash tools/onnxruntime/build_reduced_runtime_unix.sh
+    CC=gcc-10 CXX=g++-10 PARALLEL="${PARALLEL:-4}" PYTHON=python3 ALLOW_RUNNING_AS_ROOT=1 bash tools/onnxruntime/build_reduced_runtime_unix.sh
     chown -R "$HOST_UID:$HOST_GID" build runtime
   '
