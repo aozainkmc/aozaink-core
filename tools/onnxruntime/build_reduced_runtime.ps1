@@ -3,6 +3,7 @@ param(
     [string]$Python = "python",
     [string]$CMakePath = "cmake",
     [string]$JavaHome = $env:JAVA_HOME,
+    [string]$CompatibilityJavaHome = "",
     [ValidateRange(1, 64)]
     [int]$Parallel = 4
 )
@@ -40,7 +41,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $OrtSource ".git"))) {
     & git clone --branch $OrtTag --depth 1 --recurse-submodules https://github.com/microsoft/onnxruntime.git $OrtSource
     if ($LASTEXITCODE -ne 0) { throw "Failed to clone ONNX Runtime $OrtTag" }
 }
-$actualOrtCommit = (& git -C $OrtSource describe --tags --exact-match).Trim()
+$actualOrtCommit = (& git -c "safe.directory=$($OrtSource -replace '\\', '/')" -C $OrtSource describe --tags --exact-match |
+    Select-Object -First 1)
+if ($actualOrtCommit) { $actualOrtCommit = $actualOrtCommit.Trim() }
 if ($LASTEXITCODE -ne 0 -or $actualOrtCommit -ne $OrtTag) {
     throw "Expected ONNX Runtime tag $OrtTag, found '$actualOrtCommit'."
 }
@@ -51,7 +54,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $EigenSource ".git"))) {
     & git -C $EigenSource checkout --detach $EigenCommit
     if ($LASTEXITCODE -ne 0) { throw "Failed to check out pinned Eigen commit" }
 }
-$actualEigenCommit = (& git -C $EigenSource rev-parse HEAD).Trim()
+$actualEigenCommit = (& git -c "safe.directory=$($EigenSource -replace '\\', '/')" -C $EigenSource rev-parse HEAD |
+    Select-Object -First 1)
+if ($actualEigenCommit) { $actualEigenCommit = $actualEigenCommit.Trim() }
 if ($actualEigenCommit -ne $EigenCommit) {
     throw "Expected Eigen $EigenCommit, found $actualEigenCommit."
 }
@@ -93,10 +98,13 @@ try {
         "--disable_rtti",
         "--disable_types", "float8",
         "--enable_lto",
+        "--enable_msvc_static_runtime",
         "--compile_no_warning_as_error",
         "--cmake_extra_defines",
+        "onnxruntime_BUILD_UNIT_TESTS=OFF",
         "CMAKE_IGNORE_PREFIX_PATH=$($previousCondaPrefix -replace '\\', '/')",
-        "FETCHCONTENT_SOURCE_DIR_EIGEN=$($EigenSource -replace '\\', '/')"
+        "FETCHCONTENT_SOURCE_DIR_EIGEN=$($EigenSource -replace '\\', '/')",
+        "CMAKE_POLICY_VERSION_MINIMUM=3.5"
     )
     & $Python @arguments
     if ($LASTEXITCODE -ne 0) { throw "Reduced ONNX Runtime build failed." }
@@ -117,12 +125,58 @@ try {
         throw "Reduced runtime unexpectedly contains another platform."
     }
 
+    $nativeInspect = Join-Path $BuildRoot "win-native-inspect"
+    if (Test-Path -LiteralPath $nativeInspect) {
+        Remove-Item -LiteralPath $nativeInspect -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force $nativeInspect | Out-Null
+    Push-Location $nativeInspect
+    try {
+        & (Join-Path $JavaHome "bin\jar.exe") xf $builtJar `
+            "ai/onnxruntime/native/win-x64/onnxruntime.dll" `
+            "ai/onnxruntime/native/win-x64/onnxruntime4j_jni.dll"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to extract Windows native libraries for inspection." }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+        throw "vswhere.exe is required to verify the Windows runtime dependencies."
+    }
+    $dumpbin = (& $vswhere -latest -products * -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" |
+        Select-Object -First 1)
+    if ($dumpbin) { $dumpbin = $dumpbin.Trim() }
+    if (-not $dumpbin -or -not (Test-Path -LiteralPath $dumpbin -PathType Leaf)) {
+        throw "dumpbin.exe was not found in the selected Visual Studio installation."
+    }
+    foreach ($nativeName in @("onnxruntime.dll", "onnxruntime4j_jni.dll")) {
+        $nativePath = Join-Path $nativeInspect "ai\onnxruntime\native\win-x64\$nativeName"
+        $dependencies = (& $dumpbin /DEPENDENTS $nativePath) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw "dumpbin failed for $nativeName" }
+        if ($dependencies -match '(?im)^\s+(?:MSVCP|VCRUNTIME)\d[^\s]*\.dll\s*$') {
+            throw "$nativeName still depends on the dynamic MSVC runtime."
+        }
+    }
+
     $smokeClasses = Join-Path $BuildRoot "smoke-classes"
     New-Item -ItemType Directory -Force $smokeClasses | Out-Null
     & (Join-Path $JavaHome "bin\javac.exe") -cp $builtJar -d $smokeClasses $SmokeSource
     if ($LASTEXITCODE -ne 0) { throw "Failed to compile the runtime smoke test." }
     & (Join-Path $JavaHome "bin\java.exe") -cp "$smokeClasses;$builtJar" RuntimeSmoke $Model
     if ($LASTEXITCODE -ne 0) { throw "Reduced runtime failed the image/trajectory smoke test." }
+
+    if ($CompatibilityJavaHome) {
+        $compatibilityJava = Join-Path $CompatibilityJavaHome "bin\java.exe"
+        if (-not (Test-Path -LiteralPath $compatibilityJava -PathType Leaf)) {
+            throw "Compatibility Java was not found: $compatibilityJava"
+        }
+        & $compatibilityJava -cp "$smokeClasses;$builtJar" RuntimeSmoke $Model
+        if ($LASTEXITCODE -ne 0) {
+            throw "Reduced runtime failed the compatibility Java image/trajectory smoke test."
+        }
+    }
 
     New-Item -ItemType Directory -Force (Split-Path -Parent $RuntimeOutput) | Out-Null
     Copy-Item -LiteralPath $builtJar -Destination $RuntimeOutput -Force

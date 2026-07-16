@@ -21,6 +21,13 @@ NATIVE_PREFIX = "ai/onnxruntime/native/"
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge verified single-platform ORT Java JARs.")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--replace-platform",
+        action="append",
+        choices=sorted(EXPECTED),
+        default=[],
+        help="Allow a later input JAR to replace this platform's native entries.",
+    )
     parser.add_argument("inputs", nargs="+", help="JAR paths or glob patterns")
     return parser.parse_args()
 
@@ -47,6 +54,7 @@ def wanted_native(name: str) -> bool:
 def main() -> None:
     args = parse_args()
     inputs = expanded_inputs(args.inputs)
+    replace_platforms = set(args.replace_platform)
     entries: dict[str, bytes] = {}
     native_seen: dict[str, set[str]] = {platform: set() for platform in EXPECTED}
 
@@ -67,7 +75,11 @@ def main() -> None:
                 data = source.read(info)
                 previous = entries.get(name)
                 if previous is not None and previous != data:
-                    raise SystemExit(f"Conflicting entry {name} from {jar_path}")
+                    platform = None
+                    if name.startswith(NATIVE_PREFIX):
+                        platform = name[len(NATIVE_PREFIX):].split("/", 1)[0]
+                    if platform not in replace_platforms:
+                        raise SystemExit(f"Conflicting entry {name} from {jar_path}")
                 entries[name] = data
 
     missing = {

@@ -75,6 +75,7 @@ actual_eigen_commit="$(git -C "$EIGEN_SOURCE" rev-parse HEAD)"
   --enable_lto \
   --compile_no_warning_as_error \
   --cmake_extra_defines \
+    "onnxruntime_BUILD_UNIT_TESTS=OFF" \
     "FETCHCONTENT_SOURCE_DIR_EIGEN=$EIGEN_SOURCE" \
     "CMAKE_POLICY_VERSION_MINIMUM=3.5"
 
