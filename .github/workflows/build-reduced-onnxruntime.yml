@@ -43,6 +43,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install ONNX Runtime build Python dependencies
+        run: python -m pip install --disable-pip-version-check flatbuffers
       - name: Build and smoke-test Windows runtime
         if: runner.os == 'Windows'
         shell: pwsh
