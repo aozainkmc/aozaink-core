@@ -44,6 +44,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install ONNX Runtime build Python dependencies
+        if: runner.os != 'Linux'
         run: python -m pip install --disable-pip-version-check flatbuffers
       - name: Build and smoke-test Windows runtime
         if: runner.os == 'Windows'
@@ -53,8 +54,12 @@ jobs:
           -Python python
           -CMakePath cmake
           -JavaHome $env:JAVA_HOME
-      - name: Build and smoke-test Unix runtime
-        if: runner.os != 'Windows'
+      - name: Build and smoke-test Linux runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: PARALLEL=4 bash tools/onnxruntime/build_reduced_runtime_linux_container.sh
+      - name: Build and smoke-test macOS runtime
+        if: runner.os == 'macOS'
         shell: bash
         run: PARALLEL=4 bash tools/onnxruntime/build_reduced_runtime_unix.sh
       - uses: actions/upload-artifact@v4

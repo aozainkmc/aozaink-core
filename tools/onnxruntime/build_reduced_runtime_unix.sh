@@ -121,6 +121,12 @@ if [[ "$PLATFORM" == linux-* ]]; then
       echo "$dynamic_section" >&2
       exit 1
     fi
+    version_info="$(readelf --version-info "$library" || true)"
+    if grep -Eq 'Name: GLIBC_2\.([3-9][2-9]|[4-9][0-9])\b|Name: GLIBC_[3-9]\.' <<<"$version_info"; then
+      echo "Linux runtime requires glibc newer than 2.31: $library" >&2
+      echo "$version_info" >&2
+      exit 1
+    fi
   done
 fi
 
