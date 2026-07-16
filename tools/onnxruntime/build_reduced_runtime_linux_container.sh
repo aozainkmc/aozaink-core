@@ -33,6 +33,6 @@ docker run --rm \
       unzip \
       zip
     python3 -m pip install --disable-pip-version-check "cmake<4" flatbuffers
-    PARALLEL="${PARALLEL:-4}" PYTHON=python3 bash tools/onnxruntime/build_reduced_runtime_unix.sh
+    PARALLEL="${PARALLEL:-4}" PYTHON=python3 ALLOW_RUNNING_AS_ROOT=1 bash tools/onnxruntime/build_reduced_runtime_unix.sh
     chown -R "$HOST_UID:$HOST_GID" build runtime
   '

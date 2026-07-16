@@ -16,6 +16,7 @@ SMOKE_SOURCE="$SCRIPT_DIR/RuntimeSmoke.java"
 MODEL="$REPOSITORY_ROOT/src/main/resources/assets/aozaink_core/ocr/mix_flash_v1/unified_dynamic.onnx"
 PARALLEL="${PARALLEL:-4}"
 PYTHON="${PYTHON:-python3}"
+ALLOW_RUNNING_AS_ROOT="${ALLOW_RUNNING_AS_ROOT:-0}"
 
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) PLATFORM="linux-x64" ;;
@@ -89,6 +90,7 @@ fi
   --disable_types float8 \
   --enable_lto \
   --compile_no_warning_as_error \
+  $([[ "$ALLOW_RUNNING_AS_ROOT" == "1" ]] && echo "--allow_running_as_root") \
   --cmake_extra_defines "${cmake_extra_defines[@]}"
 
 built_jar="$ORT_SOURCE/java/build/libs/onnxruntime-$ORT_VERSION.jar"
