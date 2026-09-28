@@ -38,3 +38,6 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+# Recognition debug dumps (written by tests and dev mode; local only)
+aozaink-debug/
