@@ -97,6 +97,43 @@ GlyphDescriber describer = AozaiInkCoreApi.getService(GlyphDescriber.class);
 
 接口契约放在 `aozaink-core` / `core.api`，实现留在具体模块。任何模块都可以注册或查询服务；没人注册时 `getService` 返回 `null`。
 
+### 跨模块频道：InkChannel（推荐的联动方式）
+
+模组之间不直接引用对方的类，一律通过 core 沟通。`InkChannel` 是一个"有名字的问题"：一个模组提问，任意多个模组回答，双方都只依赖 core。
+
+```java
+// 提问方（问题的主人）
+static final InkChannel<LivingEntity, Pair<List<ItemStack>, Double>> SHARED_EQUIPMENT = InkChannel.of(
+    ResourceLocation.fromNamespaceAndPath("aozaink_arsenal", "shared_equipment"), LivingEntity.class, Pair.class);
+for (Pair<List<ItemStack>, Double> answer : SHARED_EQUIPMENT.ask(entity)) { ... }
+
+// 回答方（任何模组，含第三方）：同一个名字、同样的类型，再挂上回答
+InkChannel.<LivingEntity, Pair<List<ItemStack>, Double>>of(
+        ResourceLocation.fromNamespaceAndPath("aozaink_arsenal", "shared_equipment"), LivingEntity.class, Pair.class)
+    .provide(entity -> entity instanceof MyMinion m ? Pair.of(m.borrowedGear(), 0.5) : null);
+```
+
+约定：
+
+- **名字归提问方**：命名空间用提问方自己的 mod id，路径写问题本身。含义不兼容地改变时换一个新路径（如 `shared_equipment_v2`），旧的保留到没人用为止。
+- **类型只用大家都能加载的类**：JDK、Minecraft、NeoForge、DataFixerUpper（`Pair`）或 core 自己的类。不要用任何玩法模组的类，否则就又变成了直接依赖。带泛型的类型按原始类（`List`、`Pair`、`Map`）声明。
+- **提问方负责写说明**：问题是什么、回答代表什么、多个回答怎么合并、在哪个线程和哪一侧被问。说明写在提问方模组的文档里，并登记到下面的频道索引。
+- **回答 `null` 就是"与我无关"**。`ask` 返回所有非空回答（按挂上的顺序），`first` 只取第一个。
+- **谁先调用 `of` 都行**，不需要等对方加载；类型对不上时 `of` 立即抛异常，并写明是哪个模组先声明的。
+- **出错不连累别人**：回答方抛异常或者回错类型，这次回答会被跳过，同类错误只记一次日志。
+- **没人回答时几乎零成本**，可以放在伤害、tick 这种高频位置。
+- `InkChannel.all()` 列出当前所有频道、声明者和回答方，方便排查。
+
+core 只负责转交，不解释任何频道。
+
+#### 频道索引
+
+| 频道 | 提问方 | 问题 → 回答 | 说明 |
+|---|---|---|---|
+| `aozaink_arsenal:shared_equipment` | 兵录 | `LivingEntity` → `Pair<List<ItemStack>, Double>` | 该生物借用、但不在自己身上的装备，以及计入兵录战斗词条的强度（0～1）；所有回答相加。豆兵组员按五成回答组长的装备。 |
+| `aozaink_sigillum:owner` | 印契 | `LivingEntity` → `UUID` | 该生物归哪个玩家（其他模块的召唤物，如豆兵），不归任何人时回答 null；取第一个回答。刻护据此给主人及其队友的召唤物加护盾，把别人的召唤物当入侵者。 |
+| `aozaink_beansoldier:shelter` | 豆兵 | `Pair<LivingEntity, Float>` → `Float` | 豆兵因离开主人而要掉的血量（不是受击），回答有多少由别人替它扛下（0 到该值）；取第一个回答。印契：站在主人或队友有效的刻护里全部扛下，否则用剩余护盾抵扣。 |
+
 ### 跨模块单向信号：InkModuleSignalEvent
 
 `InkModuleSignalEvent` 是一个通用的模块间信号容器：`ServerPlayer + ResourceLocation signalId + CompoundTag payload`。core 只提供事件类型，不注册具体信号、不解释 `signalId`，也不把它映射成玩法或成就。当前用法是 input 广播客观输入结果，sigillum 作为玩法模块自行解释。
