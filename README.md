@@ -132,6 +132,7 @@ core 只负责转交，不解释任何频道。
 |---|---|---|---|
 | `aozaink_arsenal:shared_equipment` | 兵录 | `LivingEntity` → `Pair<List<ItemStack>, Double>` | 该生物借用、但不在自己身上的装备，以及计入兵录战斗词条的强度（0～1）；所有回答相加。豆兵组员按五成回答组长的装备。 |
 | `aozaink_sigillum:owner` | 印契 | `LivingEntity` → `UUID` | 该生物归哪个玩家（其他模块的召唤物，如豆兵），不归任何人时回答 null；取第一个回答。刻护据此给主人及其队友的召唤物加护盾，把别人的召唤物当入侵者。 |
+| `aozaink_beansoldier:shelter` | 豆兵 | `Pair<LivingEntity, Float>` → `Float` | 豆兵因离开主人而要掉的血量（不是受击），回答有多少由别人替它扛下（0 到该值）；取第一个回答。印契：站在主人或队友有效的刻护里全部扛下，否则用剩余护盾抵扣。 |
 
 ### 跨模块单向信号：InkModuleSignalEvent
 
