@@ -44,6 +44,15 @@ present they produce three choices in Core (and the Molu workspace bundle)
 - `-thin`: no embedded runtime, for environments that provide it separately;
 - `-reduced`: one model-specific runtime containing all five desktop targets.
 
+In the `-reduced` variant the native libraries are not left inside the
+embedded runtime JAR. The `packReducedNatives` task moves them into
+`META-INF/aozaink_core/onnxruntime-native/<platform>/` as xz files, together
+with an `index.properties` of their sizes and SHA-256 hashes, and embeds the
+`org.tukaani:xz` decoder next to the runtime. On first start Core unpacks the
+current platform's two libraries into `<game dir>/.molu/cache/onnxruntime/`
+and points `onnxruntime.native.path` there; later starts only check the cached
+file sizes. `reducedRuntimeTest` runs the Core tests through this path.
+
 Install exactly one variant. Before the universal CI artifact has been copied
 in, local Windows builds intentionally emit `-reduced-win-x64` instead of
 pretending the partial runtime is cross-platform. The complete artifact always

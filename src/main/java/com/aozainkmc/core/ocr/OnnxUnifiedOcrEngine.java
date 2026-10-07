@@ -51,6 +51,7 @@ public final class OnnxUnifiedOcrEngine implements OcrEngine {
         for (int i = 0; i < chars.size(); i++) {
             charToId.put(chars.get(i), i);
         }
+        OrtNativeCache.prepare();
         this.environment = OrtEnvironment.getEnvironment();
         this.session = createSession(MODEL_DIR + "/" + meta.get("model").getAsString());
     }

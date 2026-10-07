@@ -1,4 +1,8 @@
 import groovy.json.JsonOutput
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 
 buildscript {
     repositories {
@@ -28,6 +32,12 @@ base {
 
 repositories {
     mavenCentral()
+}
+
+configurations {
+    reducedNativeUnpacker {
+        transitive = false
+    }
 }
 
 java {
@@ -62,6 +72,8 @@ dependencies {
             prefer project.onnxruntime_version
         }
     }
+    compileOnly "org.tukaani:xz:${project.xz_version}"
+    reducedNativeUnpacker "org.tukaani:xz:${project.xz_version}"
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -117,6 +129,9 @@ def reducedRuntimeArtifact = hasUniversalReducedRuntime
     : "onnxruntime-${project.onnxruntime_version}-reduced-win-x64.jar"
 def reducedRuntimeJar = hasUniversalReducedRuntime ? universalReducedRuntimeJar : windowsReducedRuntimeJar
 def reducedJarJarDirectory = layout.buildDirectory.dir("generated/reduced-jarjar")
+def reducedRuntimeDirectory = layout.buildDirectory.dir("generated/reduced-runtime")
+def reducedNativeDirectory = layout.buildDirectory.dir("generated/reduced-native")
+def reducedNativeUnpackerArtifact = "xz-${project.xz_version}.jar"
 
 def deleteStaleReducedVariant = tasks.register("deleteStaleReducedVariant", Delete) {
     def staleClassifier = hasUniversalReducedRuntime ? "reduced-win-x64" : "reduced"
@@ -130,6 +145,7 @@ def prepareReducedJarJarMetadata = tasks.register("prepareReducedJarJarMetadata"
     description = "Generates NeoForge JarJar metadata for the reduced ONNX Runtime (${reducedRuntimePlatform})."
     inputs.property("onnxruntimeVersion", project.onnxruntime_version)
     inputs.property("runtimeArtifact", reducedRuntimeArtifact)
+    inputs.property("xzVersion", project.xz_version)
     outputs.file(reducedJarJarDirectory.map { it.file("metadata.json") })
 
     doLast {
@@ -147,8 +163,96 @@ def prepareReducedJarJarMetadata = tasks.register("prepareReducedJarJarMetadata"
                 ],
                 path: "META-INF/jarjar/${reducedRuntimeArtifact}",
                 isObfuscated: false
+            ], [
+                identifier: [
+                    group: "org.tukaani",
+                    artifact: "xz"
+                ],
+                version: [
+                    range: "[${project.xz_version},)",
+                    artifactVersion: project.xz_version
+                ],
+                path: "META-INF/jarjar/${reducedNativeUnpackerArtifact}",
+                isObfuscated: false
             ]]
         ])) + System.lineSeparator()
+    }
+}
+
+def packReducedNatives = tasks.register("packReducedNatives") {
+    group = "build"
+    description = "Moves the reduced ONNX Runtime native libraries into xz-compressed Core resources."
+    inputs.file(reducedRuntimeJar)
+    inputs.files(configurations.reducedNativeUnpacker)
+    outputs.dir(reducedRuntimeDirectory)
+    outputs.dir(reducedNativeDirectory)
+
+    doFirst {
+        if (!reducedRuntimeJar.asFile.exists()) {
+            throw new GradleException(
+                "Reduced ONNX Runtime is missing: ${reducedRuntimeJar.asFile}. " +
+                "Run tools/onnxruntime/build_reduced_runtime.ps1 first."
+            )
+        }
+    }
+
+    doLast {
+        project.delete(reducedRuntimeDirectory, reducedNativeDirectory)
+        def nativePrefix = "ai/onnxruntime/native/"
+        def nativeRoot = reducedNativeDirectory.get().dir("META-INF/aozaink_core/onnxruntime-native").asFile
+        def runtimeOutput = reducedRuntimeDirectory.get().file(reducedRuntimeArtifact).asFile
+        nativeRoot.mkdirs()
+        runtimeOutput.parentFile.mkdirs()
+        def index = new TreeMap<String, String>()
+        def xzLoader = new URLClassLoader(
+            configurations.reducedNativeUnpacker.files.collect { it.toURI().toURL() } as URL[],
+            (ClassLoader) null
+        )
+        def optionsClass = xzLoader.loadClass("org.tukaani.xz.LZMA2Options")
+        def outputClass = xzLoader.loadClass("org.tukaani.xz.XZOutputStream")
+        def filterOptionsClass = xzLoader.loadClass("org.tukaani.xz.FilterOptions")
+
+        try {
+            new ZipFile(reducedRuntimeJar.asFile).withCloseable { zip ->
+                new ZipOutputStream(new FileOutputStream(runtimeOutput)).withCloseable { out ->
+                    zip.entries().each { entry ->
+                        if (entry.name.startsWith(nativePrefix)) {
+                            if (entry.isDirectory()) {
+                                return
+                            }
+                            def key = entry.name.substring(nativePrefix.length())
+                            def bytes = zip.getInputStream(entry).bytes
+                            def packed = new File(nativeRoot, "${key}.xz")
+                            packed.parentFile.mkdirs()
+                            def options = optionsClass.getConstructor(int).newInstance(9)
+                            options.setDictSize(16 << 20)
+                            outputClass.getConstructor(OutputStream, filterOptionsClass)
+                                .newInstance(new FileOutputStream(packed), options)
+                                .withCloseable { it.write(bytes) }
+                            index[key] = "${bytes.length}:${MessageDigest.getInstance("SHA-256").digest(bytes).encodeHex()}"
+                            return
+                        }
+                        def copy = new ZipEntry(entry.name)
+                        copy.time = entry.time
+                        out.putNextEntry(copy)
+                        if (!entry.isDirectory()) {
+                            zip.getInputStream(entry).withCloseable { out << it }
+                        }
+                        out.closeEntry()
+                    }
+                }
+            }
+        } finally {
+            xzLoader.close()
+        }
+
+        if (index.isEmpty()) {
+            throw new GradleException("Reduced ONNX Runtime contains no native libraries: ${reducedRuntimeJar.asFile}")
+        }
+        new File(nativeRoot, "index.properties").setText(
+            index.collect { key, value -> "${key}=${value}" }.join("\n") + "\n",
+            "UTF-8"
+        )
     }
 }
 
@@ -161,6 +265,7 @@ def reducedJar = tasks.register("reducedJar", Jar) {
     dependsOn tasks.named("jar")
     dependsOn prepareReducedJarJarMetadata
     dependsOn deleteStaleReducedVariant
+    dependsOn packReducedNatives
     inputs.file(reducedRuntimeJar)
 
     doFirst {
@@ -176,13 +281,17 @@ def reducedJar = tasks.register("reducedJar", Jar) {
         exclude "META-INF/MANIFEST.MF"
         exclude "META-INF/jarjar/**"
     }
-    from(reducedRuntimeJar) {
+    from(reducedRuntimeDirectory) {
         into "META-INF/jarjar"
-        rename { reducedRuntimeArtifact }
+    }
+    from(configurations.reducedNativeUnpacker) {
+        into "META-INF/jarjar"
+        rename { reducedNativeUnpackerArtifact }
     }
     from(reducedJarJarDirectory) {
         into "META-INF/jarjar"
     }
+    from(reducedNativeDirectory)
 }
 
 artifacts {
@@ -197,12 +306,18 @@ def reducedRuntimeTest = tasks.register("reducedRuntimeTest", Test) {
     group = "verification"
     description = "Runs Core tests against the reduced ONNX Runtime (${reducedRuntimePlatform})."
     dependsOn tasks.named("testClasses")
+    dependsOn packReducedNatives
     inputs.file(reducedRuntimeJar)
 
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath.filter {
         !(it.name == "onnxruntime-${project.onnxruntime_version}.jar")
-    } + files(reducedRuntimeJar)
+    } + files(
+        reducedRuntimeDirectory.map { it.file(reducedRuntimeArtifact) },
+        reducedNativeDirectory
+    ) + configurations.reducedNativeUnpacker
+    systemProperty "aozaink_core.native_cache",
+        layout.buildDirectory.dir("tmp/reducedRuntimeTest/native-cache").get().asFile.absolutePath
     useJUnitPlatform()
 
     onlyIf {
