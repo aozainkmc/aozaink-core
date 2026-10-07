@@ -104,6 +104,31 @@ jar_entries="$(jar tf "$built_jar")"
 grep -Fxq "ai/onnxruntime/native/$PLATFORM/libonnxruntime.$extension" <<<"$jar_entries"
 grep -Fxq "ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.$extension" <<<"$jar_entries"
 
+strip_dir="$BUILD_ROOT/native-strip/$PLATFORM"
+rm -rf "$strip_dir"
+mkdir -p "$strip_dir"
+(
+  cd "$strip_dir"
+  jar xf "$built_jar" \
+    "ai/onnxruntime/native/$PLATFORM/libonnxruntime.$extension" \
+    "ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.$extension"
+)
+for library in \
+  "$strip_dir/ai/onnxruntime/native/$PLATFORM/libonnxruntime.$extension" \
+  "$strip_dir/ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.$extension"; do
+  size_before="$(wc -c < "$library" | tr -d ' ')"
+  if [[ "$PLATFORM" == linux-* ]]; then
+    strip --strip-unneeded "$library"
+  else
+    strip -x "$library"
+    codesign --force --sign - "$library"
+  fi
+  echo "Stripped $(basename "$library"): $size_before -> $(wc -c < "$library" | tr -d ' ') bytes"
+done
+jar uf "$built_jar" \
+  -C "$strip_dir" "ai/onnxruntime/native/$PLATFORM/libonnxruntime.$extension" \
+  -C "$strip_dir" "ai/onnxruntime/native/$PLATFORM/libonnxruntime4j_jni.$extension"
+
 if [[ "$PLATFORM" == linux-* ]]; then
   native_check_dir="$BUILD_ROOT/native-link-check/$PLATFORM"
   rm -rf "$native_check_dir"

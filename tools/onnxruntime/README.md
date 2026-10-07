@@ -31,6 +31,11 @@ builds the three Core variants. Download its universal runtime artifact into:
 
 `runtime/reduced/universal/onnxruntime-1.20.0-reduced.jar`
 
+On Linux and macOS the Unix script strips local symbols from both native
+libraries before the smoke test (`strip --strip-unneeded` on Linux, `strip -x`
+plus an ad-hoc `codesign` on macOS); the exported C API and JNI symbols stay.
+Windows DLLs carry no symbol table, so the Windows build is unchanged.
+
 Normal Gradle builds do not recompile ONNX Runtime. With the universal runtime
 present they produce three choices in Core (and the Molu workspace bundle)
 `build/libs` directories:
